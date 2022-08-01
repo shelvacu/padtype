@@ -1,9 +1,11 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
+use std::io;
 use std::time::Duration;
 
 use itermore::Itermore;
 use rusty_xinput::XInputState;
+use winput_stuffer::KeyboardLayout;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Hash)]
 pub enum Action {
@@ -84,22 +86,46 @@ fn polar_to_octant(p: Polar) -> Option<OctantSection> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Buzz { Big, Small }
 
-fn execute_action(a: &Action, pressed: bool) {
+fn action_extend_inputs(a: &Action, pressed: bool, layout: &KeyboardLayout, inputs_out: &mut Vec<winput_stuffer::input::Input>) {
     dbg!(a, pressed);
     match a {
         Action::None => (),
-        Action::Unicode(c) => if pressed { winput_stuffer::send::send_text(c).unwrap() },
+        Action::Unicode(text) => {
+            let c = text.chars().next();
+            if text.len() == 1 && layout.char_to_vk_ss().get(&c.unwrap()).map(|(_vk, ss)| *ss == 0).unwrap_or(false) {
+                let vk = layout.char_to_vk_ss()[&c.unwrap()].0;
+                inputs_out.push(
+                    winput_stuffer::input::Input::from_keyboard(&winput_stuffer::send::key_event(vk, pressed, None).into())
+                );
+            } else if pressed {
+                winput_stuffer::send::inputs_for_text(
+                    text.as_str(),
+                    layout,
+                    inputs_out,
+                );
+            }
+        }
         Action::Key(keyname) => {
-            winput_stuffer::send::send_key(keyname, pressed).unwrap();
+            inputs_out.push(winput_stuffer::send::input_for_key(keyname, pressed, layout));
         },
         Action::Combo(keys) => {
             if pressed {
                 for k in keys {
-                    winput_stuffer::send::send_key(k, true).unwrap()
+                    if k.len() == 1 {
+                        winput_stuffer::send::inputs_for_text(
+                            k.as_str(),
+                            layout,
+                            inputs_out,
+                        );
+                    } else {
+                        inputs_out.push(winput_stuffer::send::input_for_key(k, true, layout));
+                    }
                 }
             } else {
-                for k in keys.into_iter().rev() {
-                    winput_stuffer::send::send_key(k, false).unwrap()
+                for k in keys.iter().rev() {
+                    if k.len() != 1 {
+                        inputs_out.push(winput_stuffer::send::input_for_key(k, false, layout));
+                    }
                 }
             }
         },
@@ -130,6 +156,10 @@ lazy_static::lazy_static!{
     //     s: Action::Combo(vec!["control_l".into(), "v".into()]),
     //     w: Action::Key("delete".into()),
     // };
+    static ref SHIFT:Action = Action::Key("shift_l".into());
+    static ref CTRL:Action = Action::Key("control_l".into());
+    static ref ALT:Action = Action::Key("alt_l".into());
+    // static ref SUPER:Action = Action::Key("super_l".into());
     static ref DPAD_ACTIONSET:[ActionSet; 2] = [
         ActionSet {
             n: Action::Key("up".into()),
@@ -223,6 +253,17 @@ impl<'a> TransitionState<'a> {
         }
     }
 
+    pub fn change_nos<F: FnMut(&XInputState) -> bool>(self, mut f: F) -> Option<bool> {
+        let before = f(self.prev);
+        let now = f(self.curr);
+        match (before, now) {
+            (false, true)  => Some(true),
+            (true, false)  => Some(false),
+            (true, true)   => None,
+            (false, false) => None,
+        }
+    }
+
     pub fn octant_change<F: FnMut(&XInputState) -> bool>(self, mut f: F, octant: OctantSection, secondary: bool) -> Option<bool> {
         let before = f(self.prev) && Some(octant) == self.prev_maybe_octant && (secondary == self.prev.right_trigger_bool());
         let now = f(self.curr) && Some(octant) == self.maybe_octant && (secondary == self.curr.right_trigger_bool());
@@ -235,19 +276,46 @@ impl<'a> TransitionState<'a> {
     }
 }
 
-fn main() {
+#[derive(Debug)]
+struct SafetyDepressShiftState {}
+
+impl Drop for SafetyDepressShiftState {
+    fn drop(&mut self) {
+        use winput_stuffer::layout::maps::*;
+        let layout = KeyboardLayout::current();
+        for kn in ["super_l", "shift_l", "control_l", "alt_l", "super_r", "shift_r", "control_r", "alt_r"] {
+            let i = winput_stuffer::send::input_for_key(kn, false, &layout);
+            let vec = vec![i];
+            let _ = winput_stuffer::input::send_input(vec.as_slice());
+        }
+        for vk in [VK_LWIN, VK_LSHIFT, VK_LCONTROL, VK_LMENU, VK_RWIN, VK_RSHIFT, VK_RCONTROL, VK_RMENU, VK_SHIFT, VK_CONTROL, VK_MENU, VK_SPACE, VK_TAB,] {
+            let ki = winput_stuffer::send::key_event(vk, false, None);
+            let vec = vec![winput_stuffer::input::Input::from_keyboard(&ki.into())];
+            //Ignore this since we're in a drop impl
+            let _ = winput_stuffer::input::send_input(vec.as_slice());
+        }
+    }
+}
+
+fn main() -> std::process::ExitCode {
     // todo: deal with disconnected device
+
+    let _safety_depress = SafetyDepressShiftState {};
 
     let (act_send, act_recv) = crossbeam::channel::bounded(4);
     std::thread::spawn(move || {
+        let mut inputs = vec![];
         while let Ok(acts) = act_recv.recv() {
+            let layout = KeyboardLayout::current();
             for (act,pressed) in acts {
-                execute_action(act, pressed);
+                action_extend_inputs(act, pressed, &layout, &mut inputs);
             }
+            winput_stuffer::input::send_input(inputs.as_slice()).map(|count| assert_eq!(inputs.len() as u32, count)).unwrap();
+            inputs.clear();
         }
     });
 
-    let mut action_queue = vec![];
+    let mut action_queue:Vec<(&Action, bool)> = vec![];
 
     let handle = rusty_xinput::XInputHandle::load_default().unwrap();
     handle.enable(true);
@@ -284,7 +352,7 @@ fn main() {
         let state = handle.get_state(0).unwrap();
 
         if state.start_button() {
-            std::process::exit(0);
+            return std::process::ExitCode::SUCCESS;
         }
 
         let rs = state.right_stick_raw();
@@ -319,6 +387,16 @@ fn main() {
             // println!("{:.5},{:.5},{:?}", p.vel, p.dir, octant);
             let mut did_action = false;
             let xmsn = TransitionState{prev: &prev_state, curr: &state, prev_maybe_octant, maybe_octant};
+
+            if let Some(pressed) = xmsn.change_nos(XInputState::left_trigger_bool) {
+                action_queue.push((&*SHIFT, pressed));
+            }
+            if let Some(pressed) = xmsn.change_nos(XInputState::left_shoulder) {
+                action_queue.push((&*CTRL, pressed));
+            }
+            if let Some(pressed) = xmsn.change_nos(XInputState::right_shoulder) {
+                action_queue.push((&*ALT, pressed));
+            }
 
             for secondary in [false, true] {
                 if let Some(pressed) = xmsn.change(XInputState::arrow_up, secondary) {
@@ -455,10 +533,12 @@ fn main() {
             // }
             prev_maybe_octant = maybe_octant;
         }
-        action_queue.sort_by_key(|(_, pressed)| *pressed as u8);
-        let mut swap_queue = vec![];
-        std::mem::swap(&mut action_queue, &mut swap_queue);
-        act_send.send(swap_queue).unwrap();
+        if !action_queue.is_empty(){
+            action_queue.sort_by_key(|(_, pressed)| *pressed as u8);
+            let mut swap_queue = vec![];
+            std::mem::swap(&mut action_queue, &mut swap_queue);
+            act_send.send(swap_queue).unwrap();
+        }
         prev_state = state;
 
         let run_duration = start.elapsed();

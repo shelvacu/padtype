@@ -4,8 +4,9 @@ use std::io;
 use std::time::Duration;
 
 use itermore::Itermore;
-use rusty_xinput::XInputState;
-use winput_stuffer::KeyboardLayout;
+// use rusty_xinput::XInputState;
+// use winput_stuffer::KeyboardLayout;
+use linput_stuffer::Keysym;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Hash)]
 pub enum Action {
@@ -14,9 +15,9 @@ pub enum Action {
     /// Send this string
     Unicode(String),
     /// Press and release the key of the given name
-    Key(String),
-    /// Press all of the given keys in order, release in reverse order
-    Combo(Vec<String>),
+    Key(Keysym),
+    // /// Press all of the given keys in order, release in reverse order
+    // Combo(Vec<String>),
 }
 
 #[derive(Default, Debug, PartialEq, Eq, Hash)]
@@ -301,6 +302,8 @@ fn main() -> std::process::ExitCode {
     // todo: deal with disconnected device
 
     let _safety_depress = SafetyDepressShiftState {};
+
+    let x_con = xcb::Connection::connect(None).unwrap();
 
     let (act_send, act_recv) = crossbeam::channel::bounded(4);
     std::thread::spawn(move || {

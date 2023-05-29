@@ -1,0 +1,10 @@
+[package]
+edition = "2021"
+name = "padtype"
+version = "0.1.0"
+
+[dependencies]
+
+[dependencies.x11rb]
+version = "0.12"
+features = [ "xtest" ]

@@ -26,8 +26,8 @@ use x11rb::protocol::xproto::ConnectionExt as aaa;
 // 6     MotionNotify
 
 pub struct KeyEvent {
-    press: bool,
-    keycode: u8, //???
+    pub press: bool,
+    pub keycode: u8, //???
 }
 
 impl From<KeyEvent> for FakeInputRequest {
@@ -46,9 +46,9 @@ impl From<KeyEvent> for FakeInputRequest {
 }
 
 pub struct ButtonEvent {
-    press: bool,
+    pub press: bool,
     // "this field is interpreted as the physical (or core) button, meaning it will be mapped to the corresponding logical button according to the most recent SetPointerMapping request." 
-    button: u8,
+    pub button: u8,
 }
 
 impl From<ButtonEvent> for FakeInputRequest {
@@ -67,9 +67,9 @@ impl From<ButtonEvent> for FakeInputRequest {
 }
 
 pub struct MotionEvent {
-    x: i16,
-    y: i16,
-    relative: bool, // detail field
+    pub x: i16,
+    pub y: i16,
+    pub relative: bool, // detail field
 }
 
 impl From<MotionEvent> for FakeInputRequest {
@@ -102,6 +102,7 @@ pub fn fake_input<C: Connection>(conn: &C, into_req: impl Into<FakeInputRequest>
 
 // Shamelessly copied most of this from https://github.com/openstenoproject/plover/blob/master/plover/oslayer/linux/keyboardcontrol_x11.py
 
+#[derive(Debug, Clone)]
 pub struct KeyStuffingContext<'a, C: Connection> {
     conn: &'a C,
     keymap: HashMap<Keysym, Mapping>,
@@ -119,6 +120,7 @@ pub struct Mapping {
     //custom_mapping: ???
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModifierMapping {
     subsize: usize,
     map: Vec<u8>,
@@ -220,34 +222,48 @@ impl<'a, C: Connection> KeyStuffingContext<'a, C> {
         }
     }
 
-    fn send_string(&mut self, s: &str) {
+    pub fn send_string(&mut self, s: &str) {
         for c in s.chars() {
-            let keysym = char_to_keysym(c);
-            let mapping = self.get_or_add_mapping(keysym).unwrap();
-            self.send_keycode(mapping.keycode, mapping.modifiers);
+            self.send_char(c)
         }
     }
 
-    fn send_keycode(&self, keycode: u8, modifiers: ModMask) {
-        for i in 0..8 {
-            if modifiers.contains(1u16 << i) {
-                let ev = KeyEvent{
-                    press: true,
-                    keycode: self.modifier_map[i][0]
-                };
-                fake_input(self.conn, ev);
+    pub fn send_char(&mut self, c: char) {
+        let keysym = char_to_keysym(c);
+        let mapping = self.get_or_add_mapping(keysym).unwrap();
+        for press in [true, false] {
+            self.send_keycode(mapping.keycode, mapping.modifiers, press);
+        }
+
+    }
+
+    pub fn send_keysym(&mut self, keysym: Keysym, press: bool) {
+        let mapping = self.get_or_add_mapping(keysym).unwrap();
+        self.send_keycode(mapping.keycode, mapping.modifiers, press)
+    }
+
+    pub fn send_keycode(&self, keycode: u8, modifiers: ModMask, press: bool) {
+        if press {
+            for i in 0..8 {
+                if modifiers.contains(1u16 << i) {
+                    let ev = KeyEvent{
+                        press: true,
+                        keycode: self.modifier_map[i][0]
+                    };
+                    fake_input(self.conn, ev);
+                }
             }
         }
-        for press in [true, false] {
-            fake_input(self.conn, KeyEvent{press, keycode});
-        }
-        for i in (0..8).rev() {
-            if modifiers.contains(1u16 << i) {
-                let ev = KeyEvent{
-                    press: false,
-                    keycode: self.modifier_map[i][0]
-                };
-                fake_input(self.conn, ev);
+        fake_input(self.conn, KeyEvent{press, keycode});
+        if !press {
+            for i in (0..8).rev() {
+                if modifiers.contains(1u16 << i) {
+                    let ev = KeyEvent{
+                        press: false,
+                        keycode: self.modifier_map[i][0]
+                    };
+                    fake_input(self.conn, ev);
+                }
             }
         }
     }

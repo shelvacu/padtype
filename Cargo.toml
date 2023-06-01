@@ -1,21 +1,2 @@
-[package]
-edition = "2021"
-name = "padtype"
-version = "0.1.0"
-
-[dependencies]
-crossbeam = "0.8.1"
-itermore = "0.2.0"
-lazy_static = "1.4.0"
-#rusty-xinput = "1.2.0"
-
-# [dependencies.windows]
-# version = "0.38.0"
-# features = [
-#     "Win32_UI_Input_XboxController",
-#     "Win32_Foundation",
-#     "Win32_System_WinRT",
-# ]
-
-#[dependencies.winput-stuffer]
-#path = "../winput-stuffer"
+[workspace]
+members = ["linput_stuffer", "app"]

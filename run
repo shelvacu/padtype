@@ -1,0 +1,3 @@
+#!/bin/bash
+export RUST_BACKTRACE=1
+nix-shell -p systemd pkgconfig --run 'DISPLAY=:0 cargo run'

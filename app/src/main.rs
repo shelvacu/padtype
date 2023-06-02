@@ -98,52 +98,6 @@ fn polar_to_octant(p: Polar) -> Option<OctantSection> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Buzz { Big, Small }
 
-// fn action_extend_inputs(a: &Action, pressed: bool, layout: &KeyboardLayout, inputs_out: &mut Vec<winput_stuffer::input::Input>) {
-//     dbg!(a, pressed);
-//     match a {
-//         Action::None => (),
-//         Action::Unicode(text) => {
-//             let c = text.chars().next();
-//             if text.len() == 1 && layout.char_to_vk_ss().get(&c.unwrap()).map(|(_vk, ss)| *ss == 0).unwrap_or(false) {
-//                 let vk = layout.char_to_vk_ss()[&c.unwrap()].0;
-//                 inputs_out.push(
-//                     winput_stuffer::input::Input::from_keyboard(&winput_stuffer::send::key_event(vk, pressed, None).into())
-//                 );
-//             } else if pressed {
-//                 winput_stuffer::send::inputs_for_text(
-//                     text.as_str(),
-//                     layout,
-//                     inputs_out,
-//                 );
-//             }
-//         }
-//         Action::Key(keyname) => {
-//             inputs_out.push(winput_stuffer::send::input_for_key(keyname, pressed, layout));
-//         },
-//         Action::Combo(keys) => {
-//             if pressed {
-//                 for k in keys {
-//                     if k.len() == 1 {
-//                         winput_stuffer::send::inputs_for_text(
-//                             k.as_str(),
-//                             layout,
-//                             inputs_out,
-//                         );
-//                     } else {
-//                         inputs_out.push(winput_stuffer::send::input_for_key(k, true, layout));
-//                     }
-//                 }
-//             } else {
-//                 for k in keys.iter().rev() {
-//                     if k.len() != 1 {
-//                         inputs_out.push(winput_stuffer::send::input_for_key(k, false, layout));
-//                     }
-//                 }
-//             }
-//         },
-//     };
-// }
-
 fn str_to_actionsets(s: &'static str) -> impl Iterator<Item=ActionSet> {
     s.chars()
     .array_chunks::<4>()
@@ -206,7 +160,7 @@ lazy_static::lazy_static!{
                     n: Action::Key(XK_Escape),
                     e: Action::Key(XK_Print),
                     s: Action::Key(XK_Insert),
-                    w: Action::Key(XK_Super_L),
+                    w: Action::Key(XK_Delete),
                 },
                 ActionSet { // SW
                     n: Action::Key(XK_F1),
@@ -227,10 +181,10 @@ lazy_static::lazy_static!{
                     w: Action::Key(XK_F12),
                 },
                 ActionSet { // Center
-                    n: Action::Key(XK_XF86_Cut),
-                    e: Action::Key(XK_XF86_Copy),
-                    s: Action::Key(XK_XF86_Paste),
-                    w: Action::Key(XK_Delete),
+                    n: Action::Key(XK_Up),
+                    e: Action::Key(XK_Right),
+                    s: Action::Key(XK_Down),
+                    w: Action::Key(XK_Left),
                 },
             ].into_iter()
         ).collect()
@@ -262,6 +216,23 @@ struct MyState {
 }
 
 impl MyState {
+    fn invert(self) -> Self {
+        Self {
+            right_x: self.left_x,
+            right_y: self.left_y,
+            left_x: self.right_x,
+            left_y: self.right_y,
+            dpad_up: self.north,
+            dpad_right: self.east,
+            dpad_down: self.south,
+            dpad_left: self.west,
+            north: self.dpad_up,
+            east: self.dpad_right,
+            south: self.dpad_down,
+            west: self.dpad_left,
+            ..self
+        }
+    }
     fn from_gamepad(g: &Gamepad) -> Self {
         Self {
             left_x: g.axis_data(gilrs::Axis::LeftStickX).map(AxisData::value).unwrap_or(0.0),
@@ -292,8 +263,10 @@ impl MyState {
 struct TransitionState<'a> {
     pub prev: &'a MyState,
     pub curr: &'a MyState,
-    pub prev_maybe_octant: Option<OctantSection>,
-    pub maybe_octant: Option<OctantSection>,
+    pub left_prev_maybe_octant: Option<OctantSection>,
+    pub left_maybe_octant: Option<OctantSection>,
+    pub right_prev_maybe_octant: Option<OctantSection>,
+    pub right_maybe_octant: Option<OctantSection>,
 }
 
 impl<'a> TransitionState<'a> {
@@ -306,8 +279,14 @@ impl<'a> TransitionState<'a> {
     // }
 
     pub fn change<F: FnMut(&MyState) -> bool>(self, mut f: F, secondary: bool) -> Option<bool> {
-        let before = f(self.prev) && (secondary == self.prev.right_trigger);
-        let now = f(self.curr) && (secondary == self.curr.right_trigger);
+        let prev = if secondary {
+            self.prev.invert()
+        } else { *self.prev };
+        let curr = if secondary {
+            self.curr.invert()
+        } else { *self.curr };
+        let before = f(&prev);
+        let now = f(&curr);
         match (before, now) {
             (false, true)  => Some(true),
             (true, false)  => Some(false),
@@ -328,8 +307,15 @@ impl<'a> TransitionState<'a> {
     }
 
     pub fn octant_change<F: FnMut(&MyState) -> bool>(self, mut f: F, octant: OctantSection, secondary: bool) -> Option<bool> {
-        let before = f(self.prev) && Some(octant) == self.prev_maybe_octant && (secondary == self.prev.right_trigger);
-        let now = f(self.curr) && Some(octant) == self.maybe_octant && (secondary == self.curr.right_trigger);
+        let prev = if secondary {
+            self.prev.invert()
+        } else { *self.prev };
+        let curr = if secondary {
+            self.curr.invert()
+        } else { *self.curr };
+        let before = f(&prev) && Some(octant) == if !secondary { self.left_prev_maybe_octant } else { self.right_prev_maybe_octant };
+        let now = f(&curr) && Some(octant) == if !secondary { self.left_maybe_octant } else { self.right_maybe_octant };
+
         match (before, now) {
             (false, true)  => Some(true),
             (true, false)  => Some(false),
@@ -356,9 +342,8 @@ impl Drop for SafetyDepressShiftState {
 fn main() -> std::process::ExitCode {
     // todo: deal with disconnected device
 
-    let (x_con, _) = x11rb::connect(None).unwrap();
     let _safety_depress = SafetyDepressShiftState;
-
+    let (x_con, _) = x11rb::connect(None).unwrap();
 
     let (act_send, act_recv) = crossbeam::channel::bounded(4);
     std::thread::spawn(move || {
@@ -376,8 +361,6 @@ fn main() -> std::process::ExitCode {
         }
     });
 
-    // let pointer_map = x_con.get_pointer_mapping().unwrap().reply().unwrap().map;
-
     let mut action_queue:Vec<(&Action, bool)> = vec![];
 
     let mut gilrs = Gilrs::new().unwrap();
@@ -392,32 +375,10 @@ fn main() -> std::process::ExitCode {
 
     let the_pad_id = the_pad_id.unwrap();
 
-    let (buzz_send, buzz_recv) = crossbeam::channel::bounded(2);
-    std::thread::spawn(move || {
-        let dur = std::time::Duration::from_millis(1);
-        while let Ok(buzz) = buzz_recv.recv() {
-            // TODO
-
-            // let power = match buzz {
-            //     Buzz::Big => 30_000,
-            //     Buzz::Small => 15_000,
-            // };
-            // handle.set_state(0, 0, power).unwrap();
-            // std::thread::sleep(dur);
-            // handle.set_state(0, 0, 0).unwrap();
-            // std::thread::sleep(dur);
-        }
-    });
-
     let mut prev_state = MyState::from_gamepad(&gilrs.gamepad(the_pad_id));
-    let mut prev_maybe_octant = None;
-    // let mut keys:Vec<_> = winput_stuffer::layout::KeyboardLayout::current()
-    //     .keyname_to_vk()
-    //     .iter()
-    //     .map(|(a, _)| a.clone())
-    //     .collect();
-    // keys.sort();
-    // dbg!(keys);
+    let mut left_prev_maybe_octant = None;
+    let mut right_prev_maybe_octant = None;
+
     println!("Running...");
     loop {
         let start = std::time::Instant::now();
@@ -431,27 +392,20 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::SUCCESS;
         }
 
-        // let mouse_move = (state.right_x, state.right_y);
-
-        // if mouse_move != (0.0, 0.0) {
-        //     let factor:f32 = 50.0;
-        //     let ev = linput_stuffer::MotionEvent{
-        //         x: (mouse_move.0 * 5.0) as _,
-        //         y: (-mouse_move.1 * 5.0) as _,
-        //         relative: true,
-        //     };
-        //     linput_stuffer::fake_input(&x_con, ev);
-        // }
-
         if state != prev_state {
-            let x = state.left_x as f64;
+            let left_maybe_octant = {let x = state.left_x as f64;
             let y = state.left_y as f64;
-            // println!("{},{}", x, y);
+
             let p = xy_to_vel_cir(x, y);
-            let maybe_octant = polar_to_octant(p);
-            // println!("{:.5},{:.5},{:?}", p.vel, p.dir, octant);
+            polar_to_octant(p)};
+            let right_maybe_octant = {let x = state.right_x as f64;
+            let y = state.right_y as f64;
+
+            let p = xy_to_vel_cir(x, y);
+            polar_to_octant(p)};
+
             let mut did_action = false;
-            let xmsn = TransitionState{prev: &prev_state, curr: &state, prev_maybe_octant, maybe_octant};
+            let xmsn = TransitionState{prev: &prev_state, curr: &state, left_prev_maybe_octant, left_maybe_octant, right_prev_maybe_octant, right_maybe_octant};
 
             if let Some(pressed) = xmsn.change_nos(|s| s.left_trigger) {
                 action_queue.push((&*SHIFT, pressed));
@@ -463,24 +417,24 @@ fn main() -> std::process::ExitCode {
                 action_queue.push((&*ALT, pressed));
             }
 
-            for secondary in [false, true] {
-                if let Some(pressed) = xmsn.change(|s| s.dpad_up, secondary) {
-                    action_queue.push((&DPAD_ACTIONSET[secondary as usize].n, pressed));
-                    did_action = did_action || pressed;
-                }
-                if let Some(pressed) = xmsn.change(|s| s.dpad_right, secondary) {
-                    action_queue.push((&DPAD_ACTIONSET[secondary as usize].e, pressed));
-                    did_action = did_action || pressed;
-                }
-                if let Some(pressed) = xmsn.change(|s| s.dpad_down, secondary) {
-                    action_queue.push((&DPAD_ACTIONSET[secondary as usize].s, pressed));
-                    did_action = did_action || pressed;
-                }
-                if let Some(pressed) = xmsn.change(|s| s.dpad_left, secondary) {
-                    action_queue.push((&DPAD_ACTIONSET[secondary as usize].w, pressed));
-                    did_action = did_action || pressed;
-                }
-            }
+            // for secondary in [false, true] {
+            //     if let Some(pressed) = xmsn.change(|s| s.dpad_up, secondary) {
+            //         action_queue.push((&DPAD_ACTIONSET[secondary as usize].n, pressed));
+            //         did_action = did_action || pressed;
+            //     }
+            //     if let Some(pressed) = xmsn.change(|s| s.dpad_right, secondary) {
+            //         action_queue.push((&DPAD_ACTIONSET[secondary as usize].e, pressed));
+            //         did_action = did_action || pressed;
+            //     }
+            //     if let Some(pressed) = xmsn.change(|s| s.dpad_down, secondary) {
+            //         action_queue.push((&DPAD_ACTIONSET[secondary as usize].s, pressed));
+            //         did_action = did_action || pressed;
+            //     }
+            //     if let Some(pressed) = xmsn.change(|s| s.dpad_left, secondary) {
+            //         action_queue.push((&DPAD_ACTIONSET[secondary as usize].w, pressed));
+            //         did_action = did_action || pressed;
+            //     }
+            // }
 
             // https://stackoverflow.com/a/16991789/1267729
             //  1/2/3 being left/middle/right buttons, 4/5 and 6/7 should do vertical and horizontal wheel scrolls.
@@ -537,54 +491,27 @@ fn main() -> std::process::ExitCode {
                 }
             }
 
-            if did_action {
-                let _ = buzz_send.try_send(
-                    if did_action {
-                        Buzz::Big
-                    } else {
-                        Buzz::Small
-                    }
-                );
-            }
-
-            // if let Some(octant) = maybe_octant {
-            //     if (prev_octant != octant && matches!(octant, OctantSection::Octant(_)))
-            //     || (!prev_state.north_button() && state.north_button())
-            //     || (!prev_state.east_button()  && state.east_button())
-            //     || (!prev_state.south_button() && state.south_button())
-            //     || (!prev_state.west_button()  && state.west_button())
-            //     {
-            //         let set = if state.left_trigger_bool() {
-            //             match octant {
-            //                 OctantSection::Center => &CENTERED_ACTIONSET,
-            //                 OctantSection::Octant(i) => &SHIFT_ACTIONSETS[usize::from(i)],
-            //             }
-            //         } else {
-            //             match octant {
-            //                 OctantSection::Center => &CENTERED_ACTIONSET,
-            //                 OctantSection::Octant(i) => &ACTIONSETS[usize::from(i)],
-            //             }
-            //         };
-            //         if state.north_button() {
-            //             do_action(&set.n);
-            //             did_action = true;
-            //         }
-            //         if state.east_button() {
-            //             do_action(&set.e);
-            //             did_action = true;
-            //         }
-            //         if state.south_button() {
-            //             do_action(&set.s);
-            //             did_action = true;
-            //         }
-            //         if state.west_button() {
-            //             do_action(&set.w);
-            //             did_action = true;
-            //         }
-            //     }
-
+            // if did_action {
+            //     use gilrs::ff::*;
+            //     let duration = Ticks::from_ms(150);
+            //     let effect = EffectBuilder::new()
+            //         .add_effect(BaseEffect {
+            //             kind: BaseEffectType::Strong { magnitude: 60_000 },
+            //             scheduling: Replay { play_for: duration, with_delay: duration * 3, ..Default::default() },
+            //             envelope: Default::default(),
+            //         })
+            //         .add_effect(BaseEffect {
+            //             kind: BaseEffectType::Weak { magnitude: 60_000 },
+            //             scheduling: Replay { after: duration * 2, play_for: duration, with_delay: duration * 3 },
+            //             ..Default::default()
+            //         })
+            //         .gamepads(&[the_pad_id])
+            //         .finish(&mut gilrs).unwrap();
+            //     effect.play().unwrap();
             // }
-            prev_maybe_octant = maybe_octant;
+
+            left_prev_maybe_octant = left_maybe_octant;
+            right_prev_maybe_octant = right_maybe_octant;
         }
         if !action_queue.is_empty(){
             action_queue.sort_by_key(|(_, pressed)| *pressed as u8);

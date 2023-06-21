@@ -1,0 +1,26 @@
+[device.main]
+# The device that steam emulates
+#path = "..."
+name = "Microsoft X-Box 360 pad 0"
+# todo: passthrough?
+
+[device.main.mappings]
+ltrigger = "ctrl"
+rtrigger = "shift"
+lbutton = "alt"
+# rbutton = "..."
+
+lmenu = "quit-padtype"
+rmenu = "reload-padtype"
+
+keyset1 = [
+    ["tab", "space", "return", "backspace"],
+    "abcdefghijklmnopqrstuvwxyz;/,.\\'"
+]
+keyset2 = [
+    ["up", "left", "down", "right"],
+    "1234567890-=[]`™",
+    ["escape", "print", "insert", "delete"],
+    ["f1-f12"]
+
+]

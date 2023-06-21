@@ -407,13 +407,13 @@ fn main() -> std::process::ExitCode {
             let mut did_action = false;
             let xmsn = TransitionState{prev: &prev_state, curr: &state, left_prev_maybe_octant, left_maybe_octant, right_prev_maybe_octant, right_maybe_octant};
 
-            if let Some(pressed) = xmsn.change_nos(|s| s.left_trigger) {
+            if let Some(pressed) = xmsn.change_nos(|s| s.right_trigger_2) {
                 action_queue.push((&*SHIFT, pressed));
             }
             if let Some(pressed) = xmsn.change_nos(|s| s.left_trigger_2) {
                 action_queue.push((&*CTRL, pressed));
             }
-            if let Some(pressed) = xmsn.change_nos(|s| s.right_trigger_2) {
+            if let Some(pressed) = xmsn.change_nos(|s| s.left_trigger) {
                 action_queue.push((&*ALT, pressed));
             }
 

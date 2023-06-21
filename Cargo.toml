@@ -1,2 +1,2 @@
 [workspace]
-members = ["linput_stuffer", "app"]
+members = ["linput_stuffer", "app", "evdev-conf"]

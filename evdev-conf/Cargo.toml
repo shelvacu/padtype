@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 evdev = "0.12"
+hidapi = "2.3.3"

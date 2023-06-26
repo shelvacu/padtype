@@ -145,6 +145,7 @@ name = "evdev-conf"
 version = "0.1.0"
 dependencies = [
  "evdev",
+ "hidapi",
 ]
 
 [[package]]
@@ -200,6 +201,18 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows",
+]
+
+[[package]]
+name = "hidapi"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f841dbb77615e116fb2ca38044b42310370f0d093c774a72361670ff2ae431b"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "winapi",
 ]
 
 [[package]]

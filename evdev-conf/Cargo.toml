@@ -6,5 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+arrayref = "0.3.7"
 evdev = "0.12"
 hidapi = "2.3.3"
+packed_bools = "0.1.0"

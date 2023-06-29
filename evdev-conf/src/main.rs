@@ -157,19 +157,31 @@ fn main() {
 
     let api = hidapi::HidApi::new().unwrap();
     let mut found = vec![];
-    for dev in api.device_list() {
-        if dev.vendor_id() == 0x28de && dev.product_id() == 0x1205 && dev.interface_number() == 2 {
-            found.push(dev);
+    let mut tries = 0;
+    loop {
+        eprintln!("Searching for steamdeckcontrollers...");
+        for dev in api.device_list() {
+            if dev.vendor_id() == 0x28de && dev.product_id() == 0x1205 && dev.interface_number() == 2 {
+                found.push(dev);
+            }
         }
-    }
 
-    if found.len() == 0 {
-        // todo: probably wait and retry
-        panic!("No steam controller-deck found!");
-    }
+        if found.len() > 1 {
+            panic!("Too many controllers! Which one...");
+        }
 
-    if found.len() > 1 {
-        panic!("Too many controllers! Which one...");
+        if found.len() == 1 {
+            break;
+        }
+
+        if tries > 10 {
+            panic!("Giving up, no steamdeckcontrollers found");
+        }
+
+        //no controller found
+        eprintln!("No steamdeckcontrollers found! Retrying...");
+        std::thread::sleep(Duration::from_millis(500));
+        tries += 1;
     }
 
     let dev = found.into_iter().next().unwrap().open_device(&api).expect("Could not open /dev/hidraw* device");

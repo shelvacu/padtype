@@ -219,7 +219,9 @@ checksum = "1f841dbb77615e116fb2ca38044b42310370f0d093c774a72361670ff2ae431b"
 dependencies = [
  "cc",
  "libc",
+ "nix 0.26.2",
  "pkg-config",
+ "udev",
  "winapi",
 ]
 
@@ -342,6 +344,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset 0.7.1",
+ "pin-utils",
  "static_assertions",
 ]
 
@@ -372,6 +375,12 @@ dependencies = [
  "lazy_static",
  "linput_stuffer",
 ]
+
+[[package]]
+name = "pin-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkg-config"
@@ -461,6 +470,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.18",
+]
+
+[[package]]
+name = "udev"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebdbbd670373442a12fe9ef7aeb53aec4147a5a27a00bbc3ab639f08f48191a"
+dependencies = [
+ "libc",
+ "libudev-sys",
+ "pkg-config",
 ]
 
 [[package]]

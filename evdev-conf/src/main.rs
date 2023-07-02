@@ -1,4 +1,5 @@
 use std::ops::Index;
+use std::io::Read;
 
 mod octant;
 mod map;
@@ -45,8 +46,12 @@ pub struct MyState {
     pub buttons: LR<Buttons>,
     pub l1: bool,
     pub l2: bool,
+    pub l3: bool,
+    pub l4: bool,
     pub r1: bool,
     pub r2: bool,
+    pub r3: bool,
+    pub r4: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -188,6 +193,102 @@ fn main() {
     dbg!(&dev);
 
     disable_lizard_trackpad(&dev).unwrap();
+    write_register(&dev, Register::RpadMode, 0).unwrap();
+    write_register(&dev, Register::LpadMode, 1).unwrap();
+    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+    write_register(&dev, Register::RpadMode, 1).unwrap();
+    write_register(&dev, Register::LpadMode, 0).unwrap();
+    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+
+    for i in 0..16 {
+        dbg!(i);
+        write_register(&dev, Register::RpadMode, i).unwrap();
+        let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+    }
+
+    // for n where (n*245 <= u16::MAX)
+    // the interval when n*245 is in both pulse values, is n*245*2 microseconds
+
+    // 245/245 -> 2039hz =~  490us
+    // 490/490 -> 1016hz =~  984us
+    // 735/735 ->  676hz =~ 1479us
+    // 980/980 ->  506hz =~ 1976us
+    // 05 (unreadable)
+    // 06 (unreadable)
+    // 07 (unreadable)
+    // 08 (unreadable)
+    // 09 227hz
+    // 10 204hz
+    // 11 186hz
+    // 12 170hz
+    // 13 157hz
+
+
+    // 244 -> 245
+    // 489 -> 490
+    // 734 -> 735
+
+    send_ff(&dev, 
+        ForceFeedback{
+            trackpad: TrackPad::Right,
+            pulse_high_us: 0,
+            pulse_low_us: 0,
+            repeat_count: 0,
+        }
+    ).unwrap();
+
+    send_ff(&dev, 
+        ForceFeedback{
+            trackpad: TrackPad::Left,
+            pulse_high_us: 0,
+            pulse_low_us: 0,
+            repeat_count: 0,
+        }
+    ).unwrap();
+    std::process::exit(0);
+
+    loop {
+        send_ff(&dev, 
+            ForceFeedback{
+                trackpad: TrackPad::Right,
+                pulse_high_us: 245*29,
+                pulse_low_us: 245,
+                repeat_count: u16::MAX,
+            }
+        ).unwrap();
+        std::thread::sleep(Duration::from_millis(1000));
+        send_ff(&dev, 
+            ForceFeedback{
+                trackpad: TrackPad::Right,
+                pulse_high_us: 245,
+                pulse_low_us: 245*29,
+                repeat_count: u16::MAX,
+            }
+        ).unwrap();
+        std::thread::sleep(Duration::from_millis(1000));
+
+    }
+    for i in 1..30 {
+        for j in 1..30 {
+            let n:u16 = (i * 245).try_into().unwrap();
+            let m:u16 = (j * 245).try_into().unwrap();
+            let (n,m) = (m,n);
+            // let m = n;
+            dbg!((n,m));
+            send_ff(&dev, 
+                ForceFeedback{
+                    trackpad: TrackPad::Right,
+                    pulse_high_us: n,
+                    pulse_low_us: m,
+                    repeat_count: u16::MAX,
+                }
+            ).unwrap();
+            std::thread::sleep(Duration::from_millis(50))
+        }
+    }
+
+    send_ff(&dev, ForceFeedback { trackpad: TrackPad::Right, pulse_high_us: 0, pulse_low_us: 0, repeat_count: 0 }).unwrap();
+    std::process::exit(0);
 
     let mut keyset = AttributeSet::new();
     for i in 1..254 {
@@ -196,6 +297,18 @@ fn main() {
 
     let mut fake_kb = VirtualDeviceBuilder::new().expect("Could not open /dev/uinput")
     .name("padtype virtual keyboard")
+    .with_keys(&*keyset).unwrap()
+    .build().unwrap();
+
+    let mut axisset = AttributeSet::new();
+    axisset.insert(RelativeAxisType::REL_X);
+    axisset.insert(RelativeAxisType::REL_Y);
+    let mut keyset = AttributeSet::new();
+    keyset.insert(Key::BTN_LEFT);
+    keyset.insert(Key::BTN_RIGHT);
+    let mut fake_mouse = VirtualDeviceBuilder::new().unwrap()
+    .name("padtype virtual mouse")
+    .with_relative_axes(&axisset).unwrap()
     .with_keys(&*keyset).unwrap()
     .build().unwrap();
 
@@ -208,16 +321,50 @@ fn main() {
     // let mut last_a_state = false;
     let mut state:Transition<MyState> = Default::default();
 
+    let mut last_r_pad_coords:Option<XY> = None;
+
     let mut input_events = vec![];
+    let mut mouse_events = vec![];
 
     let mut buf = [0u8; 128];
     loop {
+        let mut any_key_down = false;
+        let mut strongify = false;
         let len = dev.read(&mut buf).unwrap();
         let inp = parse_input_report(&buf[0..len]);
+        // dbg!(inp.get_r_pad_touch(), inp.pads().r);
+
+        if inp.get_r_pad_touch() {
+            // dbg!("partly");
+            let now_r_pad_coords = inp.pads().r;
+            if let Some(coords) = last_r_pad_coords {
+                // dbg!("yay");
+                let rel_x = now_r_pad_coords.x - coords.x;
+                let rel_y = now_r_pad_coords.y - coords.y;
+                fake_mouse.emit(&[
+                    InputEvent::new(
+                        EventType::RELATIVE,
+                        RelativeAxisType::REL_X.0,
+                        (rel_x/150).into(),
+                    ),
+                    InputEvent::new(
+                        EventType::RELATIVE,
+                        RelativeAxisType::REL_Y.0,
+                        (-rel_y/150).into(),
+                    ),
+                ]).unwrap();
+            }
+            last_r_pad_coords = Some(now_r_pad_coords);
+        } else {
+            last_r_pad_coords = None;
+        }
+
         state.push_new(inp.state());
 
         if state.changed() {
             if let Some(pressed) = state.change(|s| s.r2) {
+                any_key_down = any_key_down || pressed;
+                strongify = true;
                 input_events.push(InputEvent::new(
                     EventType::KEY,
                     evdev::Key::KEY_LEFTSHIFT.0,
@@ -225,6 +372,7 @@ fn main() {
                 ));
             }
             if let Some(pressed) = state.change(|s| s.l2) {
+                any_key_down = any_key_down || pressed;
                 input_events.push(InputEvent::new(
                     EventType::KEY,
                     evdev::Key::KEY_LEFTCTRL.0,
@@ -232,9 +380,26 @@ fn main() {
                 ));
             }
             if let Some(pressed) = state.change(|s| s.l1) {
+                any_key_down = any_key_down || pressed;
                 input_events.push(InputEvent::new(
                     EventType::KEY,
                     evdev::Key::KEY_LEFTALT.0,
+                    pressed as i32,
+                ));
+            }
+            if let Some(pressed) = state.change(|s| s.r4) {
+                any_key_down = any_key_down || pressed;
+                mouse_events.push(InputEvent::new(
+                    EventType::KEY,
+                    evdev::Key::BTN_LEFT.0,
+                    pressed as i32,
+                ));
+            }
+            if let Some(pressed) = state.change(|s| s.l4) {
+                any_key_down = any_key_down || pressed;
+                mouse_events.push(InputEvent::new(
+                    EventType::KEY,
+                    evdev::Key::BTN_RIGHT.0,
                     pressed as i32,
                 ));
             }
@@ -261,6 +426,7 @@ fn main() {
 
                 for i in 0..4 {
                     if let Some(pressed) = s.change(|s| s.stick.octant() == Some(octant) && s.buttons[i]) {
+                        any_key_down = any_key_down || pressed;
                         input_events.push(InputEvent::new(
                             EventType::KEY,
                             actionset[i].0,
@@ -275,7 +441,22 @@ fn main() {
             fake_kb.emit(&input_events).unwrap();
         }
 
+        if mouse_events.len() > 0 {
+            fake_mouse.emit(&mouse_events).unwrap();
+        }
+
         input_events.clear();
+        mouse_events.clear();
+
+        if any_key_down {
+            send_ff(&dev, ForceFeedback {
+                trackpad: TrackPad::Left, 
+                pulse_high_us: 20000, 
+                pulse_low_us: 30000, 
+                repeat_count: 1000,
+            }).unwrap();
+            eprintln!("Sent ff!");
+        }
         // if inp.get_a() != last_a_state {
         //     let is_pressed = inp.get_a();
         //     if is_pressed {
@@ -297,7 +478,7 @@ fn main() {
 }
 
 use arrayref::array_ref;
-use evdev::{uinput::VirtualDeviceBuilder, AttributeSet, InputEvent, EventType, Key};
+use evdev::{uinput::VirtualDeviceBuilder, AttributeSet, InputEvent, EventType, Key, RelativeAxisType};
 use hidapi::{HidDevice, HidError};
 use packed_bools::PackedBooleans;
 
@@ -400,8 +581,12 @@ impl InputReport {
             buttons: self.quads(),
             l1: self.get_l1(),
             l2: self.get_l2(),
+            l3: self.get_l3(),
+            l4: self.get_l4(),
             r1: self.get_r1(),
             r2: self.get_r2(),
+            r3: self.get_r3(),
+            r4: self.get_r4(),
         }
     }
 }
@@ -457,6 +642,58 @@ fn parse_input_report(r: &[u8]) -> InputReport {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TrackPad {
+    Left  = 0x01,
+    Right = 0x00,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ForceFeedback {
+    // magic 0x8f 0x07
+    pub trackpad: TrackPad,
+    // SteamControllerSinger has the "magic period ratio" 495483.0
+    // which is off by a factor of two because it uses that for both on and off period
+    // It's close enough to 500k/1m that I'm just gonna call these microseconds
+    pub pulse_high_us: u16,
+    pub pulse_low_us: u16,
+    pub repeat_count: u16,
+    // [0x00; 55]
+}
+
+pub fn send_ff(dev: &HidDevice, mut ff: ForceFeedback) -> Result<(), HidError> {
+    // dbg!(strongify);
+    // if strongify {
+    //     ff.pulse_high_us = 2000;
+    //     ff.pulse_low_us = 2000;
+    // } else {
+    //     ff.pulse_high_us = ((1.0/440.0) * 495483.0) as u16;
+    //     ff.pulse_low_us = ((1.0/440.0) * 495483.0) as u16;
+    // }
+    // dbg!(ff);
+    let mut data = [0u8; 64];
+    data[0] = 0x8f;
+    data[1] = 0x07;
+    data[2] = ff.trackpad as u8;
+    data[3] = (ff.pulse_high_us & 0xff) as u8;
+    data[4] = (ff.pulse_high_us >> 8) as u8;
+    data[5] = (ff.pulse_low_us & 0xff) as u8;
+    data[6] = (ff.pulse_low_us >> 8) as u8;
+    data[7] = (ff.repeat_count & 0xff) as u8;
+    data[8] = (ff.repeat_count >> 8) as u8;
+
+    // if i was a strength value, where would I be...
+    // if strongify {
+    //     data[9] = 0xff;
+    //     data[10] = 0xff;
+    //     data[11] = 0xff;
+    //     data[12] = 0xff;
+    // }
+
+    dev.write(data.as_slice()).map(|_| ())
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Register {
@@ -466,7 +703,7 @@ pub enum Register {
     GyroMode = 0x30,
 }
 
-fn write_register(dev: &HidDevice, register: Register, value: u16) -> Result<usize, HidError> {
+fn write_register(dev: &HidDevice, register: Register, value: u16) -> Result<(), HidError> {
     let mut write_buf = [0u8; 64];
     write_buf[0] = Report::WriteRegister as u8;
     write_buf[1] = 3; // length
@@ -474,11 +711,12 @@ fn write_register(dev: &HidDevice, register: Register, value: u16) -> Result<usi
     let val_bytes = value.to_le_bytes();
     write_buf[3] = val_bytes[0];
     write_buf[4] = val_bytes[1];
-    dev.write(write_buf.as_slice())
+    dev.write(write_buf.as_slice()).map(|_| ())
 }
 
 fn disable_lizard_trackpad(dev: &HidDevice) -> Result<(), HidError> {
     write_register(dev, Register::RpadMode, 0x07)?;
     write_register(dev, Register::RpadMargin, 0x00)?;
+    write_register(dev, Register::LpadMode, 0x07)?;
     Ok(())
 }

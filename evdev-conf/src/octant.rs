@@ -47,7 +47,7 @@ pub fn polar_to_octant(p: Polar) -> Option<OctantSection> {
         Some(OctantSection::Octant(5))
     } else if within_padd(p.dir, 6.0/8.0, 7.0/8.0) {
         Some(OctantSection::Octant(6))
-    } else if within_padd(p.dir, 7.0/8.0, 8.0/8.0) {
+    } else if within_padd(p.dir, 7.0/8.0, 1.0) {
         Some(OctantSection::Octant(7))
     } else {
         None

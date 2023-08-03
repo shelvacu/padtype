@@ -1,5 +1,4 @@
 use std::ops::Index;
-use std::io::Read;
 
 mod octant;
 mod map;
@@ -12,10 +11,27 @@ pub struct LR<T> {
     pub r: T,
 }
 
+impl<T> LR<T> {
+    // pub fn both<F: Fn(&T) -> bool>(&self, f: F) -> bool {
+    //     f(&self.l) && f(&self.r)
+    // }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct XY {
     pub x: i16,
     pub y: i16,
+}
+
+impl core::ops::Sub<XY> for XY {
+    type Output = Self;
+
+    fn sub(self, rhs: XY) -> Self::Output {
+        Self{
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
 }
 
 impl XY {
@@ -43,6 +59,8 @@ pub struct Buttons {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct MyState {
     pub sticks: LR<XY>,
+    pub pads: LR<XY>,
+    pub pad_strength: LR<u16>,
     pub buttons: LR<Buttons>,
     pub l1: bool,
     pub l2: bool,
@@ -96,6 +114,10 @@ impl<T> Transition<T> {
 
     pub fn map<U, F: FnMut(T) -> U>(self, mut f: F) -> Transition<U> {
         Transition { prev: f(self.prev), curr: f(self.curr) }
+    }
+
+    pub fn both<F: Fn(&T) -> bool>(&self, f: F) -> bool {
+        f(&self.prev) && f(&self.curr)
     }
 
     pub fn as_ref(&self) -> Transition<&T> {
@@ -192,18 +214,17 @@ fn main() {
     let dev = found.into_iter().next().unwrap().open_device(&api).expect("Could not open /dev/hidraw* device");
     dbg!(&dev);
 
-    disable_lizard_trackpad(&dev).unwrap();
-    write_register(&dev, Register::RpadMode, 0).unwrap();
-    write_register(&dev, Register::LpadMode, 1).unwrap();
-    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
-    write_register(&dev, Register::RpadMode, 1).unwrap();
-    write_register(&dev, Register::LpadMode, 0).unwrap();
-    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+    const USE_BUILTIN_MOUSE:bool = true;
 
-    for i in 0..16 {
-        dbg!(i);
-        write_register(&dev, Register::RpadMode, i).unwrap();
-        let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+    if USE_BUILTIN_MOUSE {
+        // Enable built-in mouse emulation. steamdeckcontroller firmware does a pretty good job
+        // Experimentation shows
+        //             0 => emulate mouse with haptics
+        // anything else => do nothing
+        // X/Y values and such are always sent regardless
+        write_register(&dev, Register::RpadMode, 0).unwrap();
+    } else {
+        disable_lizard_trackpad(&dev).unwrap();
     }
 
     // for n where (n*245 <= u16::MAX)
@@ -230,65 +251,65 @@ fn main() {
 
     send_ff(&dev, 
         ForceFeedback{
-            trackpad: TrackPad::Right,
+            trackpad: TrackPad::Both,
             pulse_high_us: 0,
             pulse_low_us: 0,
             repeat_count: 0,
         }
     ).unwrap();
 
-    send_ff(&dev, 
-        ForceFeedback{
-            trackpad: TrackPad::Left,
-            pulse_high_us: 0,
-            pulse_low_us: 0,
-            repeat_count: 0,
-        }
-    ).unwrap();
-    std::process::exit(0);
+    // send_ff(&dev, 
+    //     ForceFeedback{
+    //         trackpad: TrackPad::Left,
+    //         pulse_high_us: 0,
+    //         pulse_low_us: 0,
+    //         repeat_count: 0,
+    //     }
+    // ).unwrap();
+    // std::process::exit(0);
 
-    loop {
-        send_ff(&dev, 
-            ForceFeedback{
-                trackpad: TrackPad::Right,
-                pulse_high_us: 245*29,
-                pulse_low_us: 245,
-                repeat_count: u16::MAX,
-            }
-        ).unwrap();
-        std::thread::sleep(Duration::from_millis(1000));
-        send_ff(&dev, 
-            ForceFeedback{
-                trackpad: TrackPad::Right,
-                pulse_high_us: 245,
-                pulse_low_us: 245*29,
-                repeat_count: u16::MAX,
-            }
-        ).unwrap();
-        std::thread::sleep(Duration::from_millis(1000));
+    // loop {
+    //     send_ff(&dev, 
+    //         ForceFeedback{
+    //             trackpad: TrackPad::Right,
+    //             pulse_high_us: 245*29,
+    //             pulse_low_us: 245,
+    //             repeat_count: u16::MAX,
+    //         }
+    //     ).unwrap();
+    //     std::thread::sleep(Duration::from_millis(1000));
+    //     send_ff(&dev, 
+    //         ForceFeedback{
+    //             trackpad: TrackPad::Right,
+    //             pulse_high_us: 245,
+    //             pulse_low_us: 245*29,
+    //             repeat_count: u16::MAX,
+    //         }
+    //     ).unwrap();
+    //     std::thread::sleep(Duration::from_millis(1000));
 
-    }
-    for i in 1..30 {
-        for j in 1..30 {
-            let n:u16 = (i * 245).try_into().unwrap();
-            let m:u16 = (j * 245).try_into().unwrap();
-            let (n,m) = (m,n);
-            // let m = n;
-            dbg!((n,m));
-            send_ff(&dev, 
-                ForceFeedback{
-                    trackpad: TrackPad::Right,
-                    pulse_high_us: n,
-                    pulse_low_us: m,
-                    repeat_count: u16::MAX,
-                }
-            ).unwrap();
-            std::thread::sleep(Duration::from_millis(50))
-        }
-    }
+    // }
+    // for i in 1..30 {
+    //     for j in 1..30 {
+    //         let n:u16 = (i * 245).try_into().unwrap();
+    //         let m:u16 = (j * 245).try_into().unwrap();
+    //         let (n,m) = (m,n);
+    //         // let m = n;
+    //         dbg!((n,m));
+    //         send_ff(&dev, 
+    //             ForceFeedback{
+    //                 trackpad: TrackPad::Right,
+    //                 pulse_high_us: n,
+    //                 pulse_low_us: m,
+    //                 repeat_count: u16::MAX,
+    //             }
+    //         ).unwrap();
+    //         std::thread::sleep(Duration::from_millis(50))
+    //     }
+    // }
 
-    send_ff(&dev, ForceFeedback { trackpad: TrackPad::Right, pulse_high_us: 0, pulse_low_us: 0, repeat_count: 0 }).unwrap();
-    std::process::exit(0);
+    // send_ff(&dev, ForceFeedback { trackpad: TrackPad::Right, pulse_high_us: 0, pulse_low_us: 0, repeat_count: 0 }).unwrap();
+    // std::process::exit(0);
 
     let mut keyset = AttributeSet::new();
     for i in 1..254 {
@@ -297,19 +318,23 @@ fn main() {
 
     let mut fake_kb = VirtualDeviceBuilder::new().expect("Could not open /dev/uinput")
     .name("padtype virtual keyboard")
-    .with_keys(&*keyset).unwrap()
+    .with_keys(&keyset).unwrap()
     .build().unwrap();
 
     let mut axisset = AttributeSet::new();
     axisset.insert(RelativeAxisType::REL_X);
     axisset.insert(RelativeAxisType::REL_Y);
+    axisset.insert(RelativeAxisType::REL_WHEEL);
+    axisset.insert(RelativeAxisType::REL_HWHEEL);
+    axisset.insert(RelativeAxisType::REL_WHEEL_HI_RES);
+    axisset.insert(RelativeAxisType::REL_HWHEEL_HI_RES);
     let mut keyset = AttributeSet::new();
     keyset.insert(Key::BTN_LEFT);
     keyset.insert(Key::BTN_RIGHT);
     let mut fake_mouse = VirtualDeviceBuilder::new().unwrap()
     .name("padtype virtual mouse")
     .with_relative_axes(&axisset).unwrap()
-    .with_keys(&*keyset).unwrap()
+    .with_keys(&keyset).unwrap()
     .build().unwrap();
 
     let mut write_buf = [0u8; 65];
@@ -322,6 +347,7 @@ fn main() {
     let mut state:Transition<MyState> = Default::default();
 
     let mut last_r_pad_coords:Option<XY> = None;
+    let mut l_pad_scroll_sum:f64 = 0.0;
 
     let mut input_events = vec![];
     let mut mouse_events = vec![];
@@ -329,30 +355,28 @@ fn main() {
     let mut buf = [0u8; 128];
     loop {
         let mut any_key_down = false;
-        let mut strongify = false;
         let len = dev.read(&mut buf).unwrap();
         let inp = parse_input_report(&buf[0..len]);
-        // dbg!(inp.get_r_pad_touch(), inp.pads().r);
 
         if inp.get_r_pad_touch() {
-            // dbg!("partly");
             let now_r_pad_coords = inp.pads().r;
             if let Some(coords) = last_r_pad_coords {
-                // dbg!("yay");
                 let rel_x = now_r_pad_coords.x - coords.x;
                 let rel_y = now_r_pad_coords.y - coords.y;
-                fake_mouse.emit(&[
-                    InputEvent::new(
-                        EventType::RELATIVE,
-                        RelativeAxisType::REL_X.0,
-                        (rel_x/150).into(),
-                    ),
-                    InputEvent::new(
-                        EventType::RELATIVE,
-                        RelativeAxisType::REL_Y.0,
-                        (-rel_y/150).into(),
-                    ),
-                ]).unwrap();
+                if !USE_BUILTIN_MOUSE {
+                    fake_mouse.emit(&[
+                        InputEvent::new(
+                            EventType::RELATIVE,
+                            RelativeAxisType::REL_X.0,
+                            (rel_x/150).into(),
+                        ),
+                        InputEvent::new(
+                            EventType::RELATIVE,
+                            RelativeAxisType::REL_Y.0,
+                            (-rel_y/150).into(),
+                        ),
+                    ]).unwrap();
+                }
             }
             last_r_pad_coords = Some(now_r_pad_coords);
         } else {
@@ -362,12 +386,43 @@ fn main() {
         state.push_new(inp.state());
 
         if state.changed() {
+            if state.both(|s| s.pad_strength.l > 1000) {
+                let diff = state.curr.pads.l - state.prev.pads.l;
+                let scroll_ticks = diff.y_f64() / 34.0;
+                mouse_events.push(
+                    InputEvent::new(
+                        EventType::RELATIVE,
+                        RelativeAxisType::REL_WHEEL_HI_RES.0,
+                        scroll_ticks as i32,
+                    )
+                );
+                l_pad_scroll_sum += scroll_ticks;
+                while l_pad_scroll_sum > 120.0 {
+                    l_pad_scroll_sum -= 120.0;
+                    mouse_events.push(
+                        InputEvent::new(
+                            EventType::RELATIVE,
+                            RelativeAxisType::REL_WHEEL.0,
+                            1,
+                        )
+                    );
+                }
+            } else {
+                l_pad_scroll_sum = 0.0;
+            }
             if let Some(pressed) = state.change(|s| s.r2) {
                 any_key_down = any_key_down || pressed;
-                strongify = true;
                 input_events.push(InputEvent::new(
                     EventType::KEY,
                     evdev::Key::KEY_LEFTSHIFT.0,
+                    pressed as i32,
+                ));
+            }
+            if let Some(pressed) = state.change(|s| s.r1) {
+                any_key_down = any_key_down || pressed;
+                input_events.push(InputEvent::new(
+                    EventType::KEY,
+                    evdev::Key::KEY_LEFTMETA.0,
                     pressed as i32,
                 ));
             }
@@ -424,6 +479,7 @@ fn main() {
                     OctantSection::Octant(i) => &m[((i as usize)+1)*4..],
                 };
 
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..4 {
                     if let Some(pressed) = s.change(|s| s.stick.octant() == Some(octant) && s.buttons[i]) {
                         any_key_down = any_key_down || pressed;
@@ -437,11 +493,11 @@ fn main() {
             }
         }
 
-        if input_events.len() > 0 {
+        if !input_events.is_empty() {
             fake_kb.emit(&input_events).unwrap();
         }
 
-        if mouse_events.len() > 0 {
+        if !mouse_events.is_empty() {
             fake_mouse.emit(&mouse_events).unwrap();
         }
 
@@ -450,25 +506,14 @@ fn main() {
 
         if any_key_down {
             send_ff(&dev, ForceFeedback {
-                trackpad: TrackPad::Left, 
-                pulse_high_us: 20000, 
-                pulse_low_us: 30000, 
-                repeat_count: 1000,
+                trackpad: TrackPad::Both,
+                pulse_high_us: 0x7fff,
+                pulse_low_us: 0x7fff,
+                repeat_count: 4,
             }).unwrap();
-            eprintln!("Sent ff!");
+            // eprintln!("Sent ff!");
         }
-        // if inp.get_a() != last_a_state {
-        //     let is_pressed = inp.get_a();
-        //     if is_pressed {
-        //         eprintln!("press a");
-        //     } else {
-        //         eprintln!("unpress a");
-        //     }
-        //     fake_kb.emit(&[InputEvent::new(EventType::KEY, evdev::Key::KEY_B.0, is_pressed as i32)]).unwrap();
-        //     last_a_state = is_pressed;
-        // }
-        // dbg!(inp.l_stick_x, inp.l_stick_y);
-        // dbg!(inp.r_pad_x, inp.r_pad_y);
+
         if last_clear_mappings.elapsed() > Duration::from_secs(1) {
             dev.write(write_buf.as_slice()).unwrap();
             last_clear_mappings = Instant::now();
@@ -489,7 +534,7 @@ pub struct InputReport {
     pub frame: u32,
     #[pack_bools(r2, l2, r1, l1, y, b, x, a)]
     pub b08: u8,
-    #[pack_bools(n, w, e, s, options, steam, menu, l5)]
+    #[pack_bools(n, e, w, s, options, steam, menu, l5)]
     pub b09: u8,
     #[pack_bools(r5, l_pad_press, r_pad_press, l_pad_touch, r_pad_touch, _unk3, l3, _unk4)]
     pub b10: u8,
@@ -578,6 +623,11 @@ impl InputReport {
     pub fn state(self) -> MyState {
         MyState {
             sticks: self.sticks(),
+            pads: self.pads(),
+            pad_strength: LR {
+                l: self.l_pad_force,
+                r: self.r_pad_force,
+            },
             buttons: self.quads(),
             l1: self.get_l1(),
             l2: self.get_l2(),
@@ -647,6 +697,7 @@ fn parse_input_report(r: &[u8]) -> InputReport {
 pub enum TrackPad {
     Left  = 0x01,
     Right = 0x00,
+    Both  = 0x02,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -662,7 +713,7 @@ pub struct ForceFeedback {
     // [0x00; 55]
 }
 
-pub fn send_ff(dev: &HidDevice, mut ff: ForceFeedback) -> Result<(), HidError> {
+pub fn send_ff(dev: &HidDevice, ff: ForceFeedback) -> Result<(), HidError> {
     // dbg!(strongify);
     // if strongify {
     //     ff.pulse_high_us = 2000;
@@ -673,8 +724,8 @@ pub fn send_ff(dev: &HidDevice, mut ff: ForceFeedback) -> Result<(), HidError> {
     // }
     // dbg!(ff);
     let mut data = [0u8; 64];
-    data[0] = 0x8f;
-    data[1] = 0x07;
+    data[0] = Report::ForceFeedback as u8;
+    data[1] = 11;
     data[2] = ff.trackpad as u8;
     data[3] = (ff.pulse_high_us & 0xff) as u8;
     data[4] = (ff.pulse_high_us >> 8) as u8;
@@ -684,12 +735,12 @@ pub fn send_ff(dev: &HidDevice, mut ff: ForceFeedback) -> Result<(), HidError> {
     data[8] = (ff.repeat_count >> 8) as u8;
 
     // if i was a strength value, where would I be...
-    // if strongify {
-    //     data[9] = 0xff;
-    //     data[10] = 0xff;
-    //     data[11] = 0xff;
-    //     data[12] = 0xff;
-    // }
+    if true {
+        data[9] = 0xff;
+        data[10] = 0xff;
+        data[11] = 0xff;
+        data[12] = 0xff;
+    }
 
     dev.write(data.as_slice()).map(|_| ())
 }
